@@ -1,0 +1,320 @@
+---
+title: "Reproducible R source context for coding agents"
+author: "Nan Xiao"
+date: "2026-11-02"
+date-format: "MMMM YYYY"
+embed-resources: false
+format:
+  revealjs:
+    theme: [default, custom.scss]
+    syntax-highlighting: github
+    mainfont: "Scoutie Sans, system-ui, -apple-system, Segoe UI, Roboto, Helvetica Neue, Arial, Noto Sans, Liberation Sans, sans-serif, Apple Color Emoji, Segoe UI Emoji, Segoe UI Symbol, Noto Color Emoji"
+    monofont: "Liga Paper Mono, ui-monospace, SFMono-Regular, SF Mono, Menlo, Consolas, Liberation Mono, monospace"
+    resources:
+      - fonts/ScoutieSans-VF.woff2
+      - fonts/ScoutieSans-Italic-VF.woff2
+      - fonts/LigaPaperMono-Regular.woff2
+    slide-number: true
+    scrollable: false
+    code-line-numbers: false
+    auto-stretch: false
+    background-transition: fade
+---
+
+## About me
+
+Hi, I'm Nan Xiao ([@nanxstats](https://www.linkedin.com/in/nanxstats))!
+
+Passionate about writing fast and correct code + better developer tooling
+
+- Learned from wholesome frequentist and Bayesian statisticians
+- Work on intersection of statistical methodology and research software engineering
+- Author of ggsci, pkglite, shinygenui, and other 40+ R, Python, and Rust packages
+
+# The problem
+
+## Agents read files. R hides them.
+
+Coding agents explore a project with file tools: list, search, read.
+
+An installed R package leaves little for them to find:
+
+```r
+pkg <- find.package("gsDesign")
+list.files(file.path(pkg, "R"))
+#> [1] "gsDesign"     "gsDesign.rdb" "gsDesign.rdx"
+"src" %in% list.files(pkg)
+#> [1] FALSE
+```
+
+- R code is serialized into lazy-load databases (`.rdb`, `.rdx`)
+- C and C++ code in `src/` is compiled, then dropped
+- `gsDesign::sfHSD` prints in R without comments. `grep` finds nothing.
+
+## Evaluations need the same context
+
+Example: the group sequential design skill in
+[RConsortium/pharma-skills](https://github.com/RConsortium/pharma-skills).
+
+- R: gsDesign, gsDesign2, lrstat, graphicalMCP, jsonlite, eventPred
+- Python: python-docx for report generation
+
+To compare models on this skill fairly:
+
+- Every model reads the same source code
+- No trip to GitHub halfway through the test
+- A record of exactly what was on disk
+
+**Goal**: exact, offline, verifiable source context, without manual setup.
+
+# Solution: okr
+
+## What okr does
+
+**okr vendors exact source trees of R packages and reference repositories
+into one greppable folder, and records digests to verify them later.**
+
+Pronounced "okay-R". A single Rust binary. Runs without R.
+
+It installs nothing. Other tools already do that well:
+
+| Job | Tool |
+|---|---|
+| Install R | rig |
+| Install packages | pak, renv, rv |
+| Pin CRAN versions over time | Posit Package Manager snapshots |
+| Source context and verification | **okr** |
+
+## Three commands
+
+```bash
+okr init
+okr add gsDesign gsDesign2 lrstat graphicalMCP jsonlite eventPred
+okr add --reference python-openxml/python-docx@v1.2.0
+okr sync
+```
+
+The result:
+
+```text
+okr.toml           # what you declared
+okr.lock           # what was resolved
+deps-src/
+├── _manifest.md   # index for agents and humans
+├── gsDesign/      # R/, src/, man/, tests/, vignettes/
+├── ...
+└── python-docx/
+```
+
+Now the agent can search:
+
+```bash
+grep -rn "^sfHSD <-" deps-src/
+```
+
+```text
+deps-src/gsDesign/R/gsSpending.R:579:sfHSD <- function(alpha, t, param) {
+```
+
+## Familiar syntax
+
+`okr add` edits `okr.toml`. You can also edit it by hand:
+
+```toml
+[project]
+snapshot = "2026-10-22"
+
+[packages]
+gsDesign = "*"                          # version in the snapshot
+gsDesign2 = "1.2.0"                     # exact CRAN version
+admiral = "pharmaverse/admiral@v1.5.0"  # GitHub tag
+simlib = "git::git@ghe.corp:stats/simlib.git@v2.1"
+
+[references]
+python-docx = "python-openxml/python-docx@v1.2.0"
+```
+
+- Specs follow the `Remotes:` syntax you know from remotes, devtools, and pak
+- Any Git host works through your own Git credentials
+- `[packages]` are R packages. `[references]` are anything else worth reading.
+
+## Lock it, verify it
+
+`renv.lock` records what to install. `okr.lock` records what the agent reads.
+
+```toml
+[[package]]
+name = "gsDesign"
+version = "3.11.0"
+source = "cran"
+tree-digest = "sha256:56b0f283..."
+```
+
+Change one line, and verification fails:
+
+```bash
+echo "# tweak" >> deps-src/gsDesign/R/gsDesign.R
+okr verify
+```
+
+```text
+verification failed: 1 mismatch(es)
+  gsDesign/.: package (Modified)
+```
+
+- Any drift exits with code 4. CI and eval harnesses can gate on it.
+- One environment digest covers it all. Report it like `sessionInfo()`.
+- `okr sync --offline` rebuilds the same tree from the local cache.
+
+# How I built it
+
+## Prompts are the new source code
+
+When an agent writes the code, the prompts carry the intent.
+
+```text
+okr-prompts/
+├── research.md    # what to build
+├── SPEC.md        # how it should behave
+├── bootstrap.md   # build 0.1.0
+├── add.md         # then one file per decision
+├── lockfile.md
+├── ...
+└── zip.md
+```
+
+Each prompt is a dated file that names the model:
+
+```yaml
+---
+date: 2026-08-08
+model: [Claude Fable 5 Extra, GPT-5.6 Sol Pro]
+---
+```
+
+Code tells you what. Prompts tell you why.
+
+## The workflow
+
+| Step | Who | Output |
+|---|---|---|
+| 1. Research | Web research agent | Direction and scope |
+| 2. Review | Me | Cuts and corrections |
+| 3. Specify | Web research agent | `SPEC.md` and a bootstrap prompt |
+| 4. Build | Claude Code | okr 0.1.0, in 1 hour 16 minutes |
+| 5. Refine | Me and a coding agent | One prompt per decision |
+
+August 8: first research prompt.
+
+August 11: spec, bootstrap prompt, and 0.1.0.
+
+Mid-September: 0.1.10.
+
+## Step 1: Ask for a direction
+
+From `research.md`:
+
+> Help me figure out the best direction to bootstrap the following Rust CLI
+> product engineering idea. Everything is technically feasible, but I want to
+> get an initial and long-term scope that maximizes its impact by being useful.
+
+> I don't want to build something too generic, but I also don't want to build
+> something too niche that only I will use.
+
+- Say who you are, what you want, and what you already believe
+- Send the same prompt to two frontier models. Compare the answers.
+
+## Step 2: Review is where judgement goes
+
+From my reply, three days later:
+
+> Now I think we should completely avoid getting into the R installation and R
+> package installation business because other tools are dedicated to that and
+> it can be a rabbit hole.
+
+> Perhaps we should support the de facto standard "package remotes" syntax in R
+> for easily adding sources.
+
+> We should let users fall into the pit of success.
+
+Smaller scope. Familiar syntax. Forgiving defaults.
+
+The same reply asked for `SPEC.md` and the bootstrap prompt.
+
+## Step 3: Write a contract
+
+`bootstrap.md` opens with: "Where this prompt and SPEC.md conflict, SPEC.md wins."
+
+```text
+Task                 Milestone 0.1, exactly as scoped in SPEC.md
+Hard constraints     "violating any of these is failure"
+Build order          13 steps, commit after each
+Test fixtures        Synthetic R packages, local Git repos
+Quality gates        fmt, clippy, and tests in CI from the first commit
+Definition of done   A checklist the agent can verify
+```
+
+Three of the hard constraints:
+
+> okr never installs anything.
+>
+> No live network access in tests.
+>
+> Deterministic outputs. [...] Instability is a bug of the highest severity.
+
+## After 0.1.0: one prompt per decision
+
+18 more prompt files. Ten patch releases.
+
+| Kind | Prompts | Example |
+|--------|-----|------------------------------------------------------|
+| Remove | 6 | "You know I'm a minimalist": one digest per tree, no per-file hashes |
+| Smooth | 4 | "Running `okr add` should succeed at first try" |
+| Fix | 3 | Duplicate `boot` records in a snapshot's `PACKAGES` index |
+| Add | 2 | `.Rbuildignore` rules, zip archives |
+| Chores | 3 | Docs site, dependency updates, blog post |
+
+The most common request removed something.
+
+## This talk uses okr
+
+```toml
+# okr.toml in this talk's repository
+[references]
+okr = "nanxstats/okr"
+revdeprun-talk = "nanxstats/revdeprun-talk"
+```
+
+A coding agent drafted these slides from `deps-src/` and the prompt files.
+
+Then I edited them.
+
+# Lessons learned
+
+## Takeaways
+
+- Spend human time on what to build. Agents are fast at how.
+- Write constraints and a definition of done. Let the agent write the code.
+- Keep prompts as dated files. They record why the code looks the way it does.
+- Taste is mostly subtraction. Leave jobs to the tools that already do them well.
+
+## Resources
+
+**Install**
+
+```bash
+brew install nanxstats/tap/okr
+cargo install okr
+```
+
+**okr on GitHub**
+
+<https://github.com/nanxstats/okr>
+
+**Documentation**
+
+<https://nanx.me/okr/>
+
+**Blog post**
+
+<https://nanx.me/blog/post/okr/>
