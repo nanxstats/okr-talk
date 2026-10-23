@@ -1,0 +1,5 @@
+project:
+  title: "okr-talk"
+  output-dir: _output
+  render:
+    - index.qmd
