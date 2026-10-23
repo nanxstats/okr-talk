@@ -1,0 +1,21 @@
+version = 2
+okr-version = "0.1.10"
+generated = "1970-01-01T00:00:00Z"
+config-digest = "sha256:5c65b2a0a6024f93be21debae4576d239d83579e2a3dc95e52a523c5c3c451e6"
+environment-digest = "sha256:e7aeab4abe8a6a34849a53fffe58046c238667476ca2c87d6c37c5f6ce83c3e9"
+package = []
+
+[[reference]]
+name = "okr"
+source = "github::nanxstats/okr"
+commit = "dddeba08d5ea79115d2d8d15b19b48c71434454e"
+fetch-method = "forge-tarball"
+tree-digest = "sha256:3fd81a3f658df6037b5f91db232c2788bc5f4eacdbc95a03c0f7405d004bcc86"
+license = "MIT"
+
+[[reference]]
+name = "revdeprun-talk"
+source = "github::nanxstats/revdeprun-talk"
+commit = "63d6d03552131a1e61cfe7530b6c73392389d482"
+fetch-method = "forge-tarball"
+tree-digest = "sha256:12fa31ba08ed560bbce2b2c74549e2d3cbf13cb2875b79b973278893647bdb58"
